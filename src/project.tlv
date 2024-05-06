@@ -21,7 +21,7 @@
    //-------------------------------------------------------
    
    var(in_fpga, 1)   /// 1 to include the demo board. (Note: Logic will be under /fpga_pins/fpga.)
-   var(debounce_inputs, 0)
+   var(debounce_inputs, 1)
                      /// Legal values:
                      ///   1: Provide synchronization and debouncing on all input signals.
                      ///   0: Don't provide synchronization and debouncing.
@@ -43,84 +43,72 @@
 
 \TLV calc()
    
-   
-   // ==================
-   // |                |
-   // | YOUR CODE HERE |
-   // |                |
-   // ==================
-   
    |calc
       @0
-         $val2[7:0] = {4'b0000, *ui_in[3:0]};
-         $op[1:0] = *ui_in[5:4];
-         $equals_in = *ui_in[7];
-      @1
          $reset = *reset;
-         //$val1[7:0] = {3'b0, $rand1[4:0]};
-         //$val2[7:0] = {5'b0, $rand2[2:0]};
-
-         $sum[7:0] = $val1[7:0] + $val2[7:0];
-         $diff[7:0] = $val1[7:0] - $val2[7:0];
-         $prod[7:0] = $val1[7:0] * $val2[7:0];
-         $quot[7:0] = $val1[7:0] / $val2[7:0];
          
-         $valid = (>>1$equals_in == 0)&&($equals_in == 1);
+         // Board's switch inputs
+         $op[2:0] = *ui_in[6:4];
+         $val2[7:0] = {4'b0, *ui_in[3:0]};
+         $equals_in = *ui_in[7];
          
-         $out[7:0] = $reset ? 8'd0 :
-                $valid == 0
-                       ? >>1$out[3:0]:
-                $op[1:0] == 2'b00
-                       ? $sum[7:0]:
-                $op[1:0] == 2'b01
-                       ? $diff[7:0]:
-                $op[1:0] == 2'b10
-                       ? $prod[7:0]:
-                         $quot[7:0];
-
-         $val1[7:0] = $reset ? 0 : >>1$out[7:0];
-         $digit[3:0] = $out[3:0];
+      @1
+         // Calculator result value ($out) becomes first operand ($val1).
+         $val1[7:0] = >>2$out;
          
-         *uo_out = $digit[3:0] == 0
-                     ? 8'b00111111:
-                   $digit[3:0] == 1
-                     ? 8'b00000110:
-                   $digit[3:0] == 2
-                     ? 8'b01011011:
-                   $digit[3:0] == 3
-                     ? 8'b01001111:
-                   $digit[3:0] == 4
-                     ? 8'b01100110:
-                   $digit[3:0] == 5
-                     ? 8'b01101101:
-                   $digit[3:0] == 6
-                     ? 8'b01111101:
-                   $digit[3:0] == 7
-                     ? 8'b00000111:
-                   $digit[3:0] == 8
-                     ? 8'b01111111:
-                   $digit[3:0] == 9
-                     ? 8'b01100111:
-                   $digit[3:0] == 10
-                     ? 8'b01110111:
-                   $digit[3:0] == 11
-                     ? 8'b01111100:
-                   $digit[3:0] == 12
-                     ? 8'b00111001:
-                   $digit[3:0] == 13
-                     ? 8'b01011110:
-                   $digit[3:0] == 14
-                     ? 8'b01111001:
-                       8'b01110001;
-   
-   // Note that pipesignals assigned here can be found under /fpga_pins/fpga.
-   
-   
+         // Perform a valid computation when "=" button is pressed.
+         $valid = $reset ? 1'b0 :
+                           $equals_in && ! >>1$equals_in;
+         
+         // Calculate (all possible operations).
+         ?$valid
+            $sum[7:0] = $val1 + $val2;
+            $diff[7:0] = $val1 - $val2;
+            $prod[7:0] = $val1 * $val2;
+            $quot[7:0] = $val1 / $val2;
+         
+         // Select the result value, resetting to 0, and retaining if no calculation.
+      @2
+         $out[7:0] = $reset ? 8'b0 :
+                     ! $valid ? >>1$out :
+                     ($op[2:0] == 3'b000) ? $sum  :
+                     ($op[2:0] == 3'b001) ? $diff :
+                     ($op[2:0] == 3'b010) ? $prod :
+                     ($op[2:0] == 3'b011) ? $quot :
+                     ($op[2:0] == 3'b100) ? >>2$mem :
+                           >>1$out;
 
-   m5+cal_viz(@1, m5_if(m5_in_fpga, /fpga, /top))
+         $mem[7:0] = $reset ? 8'b0 :
+                     ! $valid ? >>1$mem :
+                      ($op[2:0] == 3'b101) ? >>1$out :
+                           >>1$mem;
+         
+      @3
+         // Display lower hex digit on 7-segment display.
+         $digit[3:0] = >>1$out[3:0];
+         *uo_out =
+                $digit == 4'h0 ? 8'b00111111 :
+                $digit == 4'h1 ? 8'b00000110 :
+                $digit == 4'h2 ? 8'b01011011 :
+                $digit == 4'h3 ? 8'b01001111 :
+                $digit == 4'h4 ? 8'b01100110 :
+                $digit == 4'h5 ? 8'b01101101 :
+                $digit == 4'h6 ? 8'b01111101 :
+                $digit == 4'h7 ? 8'b00000111 :
+                $digit == 4'h8 ? 8'b01111111 :
+                $digit == 4'h9 ? 8'b01101111 :
+                $digit == 4'hA ? 8'b01110111 :
+                $digit == 4'hB ? 8'b01111100 :
+                $digit == 4'hC ? 8'b00111001 :
+                $digit == 4'hD ? 8'b01011110 :
+                $digit == 4'hE ? 8'b01111001 :
+                               8'b01110001;
+         
+         
+   m5+cal_viz(@4, m5_if(m5_in_fpga, /fpga, /top))
    
    // Connect Tiny Tapeout outputs. Note that uio_ outputs are not available in the Tiny-Tapeout-3-based FPGA boards.
-   //*uo_out = 8'b0;
+   *uo_out = 8'b0;
    m5_if_neq(m5_target, FPGA, ['*uio_out = 8'b0;'])
    m5_if_neq(m5_target, FPGA, ['*uio_oe = 8'b0;'])
 
@@ -135,7 +123,7 @@ module top(input logic clk, input logic reset, input logic [31:0] cyc_cnt, outpu
    // Tiny tapeout I/O signals.
    logic [7:0] ui_in, uo_out;
    m5_if_neq(m5_target, FPGA, ['logic [7:0] uio_in, uio_out, uio_oe;'])
-   logic [31:0] r;
+   logic [31:0] r;  // a random value
    always @(posedge clk) r <= m5_if_defined_as(MAKERCHIP, 1, ['$urandom()'], ['0']);
    assign ui_in = r[7:0];
    m5_if_neq(m5_target, FPGA, ['assign uio_in = 8'b0;'])
@@ -145,7 +133,7 @@ module top(input logic clk, input logic reset, input logic [31:0] cyc_cnt, outpu
    // Instantiate the Tiny Tapeout module.
    m5_user_module_name tt(.*);
    
-   assign passed = top.cyc_cnt > 80;
+   assign passed = top.cyc_cnt > 160;
    assign failed = 1'b0;
 endmodule
 
@@ -181,7 +169,7 @@ module m5_user_module_name (
    m5+board(/top, /fpga, 7, $, , calc)
    // Label the switch inputs [0..7] (1..8 on the physical switch panel) (top-to-bottom).
    m5_if(m5_in_fpga, ['m5+tt_input_labels_viz(['"Value[0]", "Value[1]", "Value[2]", "Value[3]", "Op[0]", "Op[1]", "Op[2]", "="'])'])
- 
+
 \TLV
    /* verilator lint_off UNOPTFLAT */
    m5_if(m5_in_fpga, ['m5+tt_lab()'], ['m5+calc()'])
